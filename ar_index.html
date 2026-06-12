@@ -607,7 +607,9 @@
         buildings.push({
           element: buildingEl,
           origScaleY: 1.0,
-          origHeight: type.height
+          origHeight: type.height,
+          x: x,
+          z: z
         });
       }
     }
@@ -618,10 +620,12 @@
     const statusLabel = document.getElementById("clutter-status");
 
     function updatePrinting(clutter) {
-      const progress = clutter * 1.5;
-      
       buildings.forEach(b => {
-        const currentScaleY = b.origScaleY * progress;
+        const x = b.x;
+        const z = b.z;
+        const delay = (x + z) / (gridX + gridZ - 2) * 0.4; // Delay offset between 0.0 and 0.4
+        const buildingClutter = Math.min(1.0, Math.max(0.0, (clutter - delay) / 0.6)); // Scale finishes in 0.6 progress
+        const currentScaleY = Math.max(0.01, buildingClutter);
         b.element.setAttribute("scale", `1 ${currentScaleY} 1`);
       });
       

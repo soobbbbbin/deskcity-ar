@@ -170,7 +170,7 @@ function initThree() {
   scene.add(reticle);
 
   // City group (stays hidden until placed)
-  cityGroup = buildCity();
+  cityGroup = buildCity(false);
   cityGroup.visible = false;
   scene.add(cityGroup);
 }
@@ -181,7 +181,7 @@ function buildReticle() {
   return new THREE.Mesh(g, m);
 }
 
-function buildCity() {
+function buildCity(fullHeight = false) {
   const group = new THREE.Group();
   const palette = [0x6c63ff, 0x00f5d4, 0xf15bb5, 0xffd166, 0x06d6a0];
 
@@ -199,7 +199,14 @@ function buildCity() {
     const mesh = new THREE.Mesh(geo, mat);
     const ox = (x - (cols-1)/2) * spacing;
     const oz = (z - (rows-1)/2) * spacing;
-    mesh.position.set(ox, h/2, oz);
+    mesh.userData = { h, x, z };
+    if (fullHeight) {
+      mesh.position.set(ox, h/2, oz);
+      mesh.scale.set(1, 1, 1);
+    } else {
+      mesh.position.set(ox, (h * 0.01) / 2, oz);
+      mesh.scale.set(1, 0.01, 1);
+    }
     group.add(mesh);
   }
 
@@ -379,20 +386,27 @@ function placeCity() {
     document.getElementById('ar-hud').style.transition = 'opacity .5s';
   }, 3000);
 
-  // Build effect: animate buildings up
-  cityGroup.children.forEach((mesh, i) => {
-    if (mesh.isMesh && mesh.geometry.type === 'BoxGeometry') {
-      const targetY = mesh.position.y;
-      mesh.position.y -= .2;
-      const delay = i * 60;
+  // Build effect: animate buildings up sequentially (wave progression)
+  cityGroup.children.forEach((mesh) => {
+    if (mesh.isMesh && mesh.geometry.type === 'BoxGeometry' && mesh.userData && mesh.userData.h !== undefined) {
+      const h = mesh.userData.h;
+      const x = mesh.userData.x;
+      const z = mesh.userData.z;
+      
+      const delay = (x + z) / 6 * 400; // Delay offset between 0 and 400ms (grid X + Z goes from 0 to 6)
       setTimeout(() => {
         let elapsed = 0;
+        const duration = 600; // 600ms build duration for each building
         const interval = setInterval(() => {
           elapsed += 16;
-          const t = Math.min(elapsed/400, 1);
-          const ease = 1 - Math.pow(1-t, 3);
-          mesh.position.y = (-0.2) + (targetY + 0.2) * ease;
-          if (t >= 1) clearInterval(interval);
+          const progress = Math.min(elapsed / duration, 1);
+          const ease = 1 - Math.pow(1 - progress, 3); // Cubic ease out
+          
+          const currentScaleY = Math.max(0.01, ease);
+          mesh.scale.y = currentScaleY;
+          mesh.position.y = (h * currentScaleY) / 2;
+          
+          if (progress >= 1) clearInterval(interval);
         }, 16);
       }, delay);
     }
@@ -408,6 +422,14 @@ function resetPlacement() {
   document.getElementById('hold-ring').style.display = 'none';
   document.getElementById('ar-hud').style.opacity = '1';
   document.getElementById('hint').textContent = '📍 바닥이나 책상을 비춰주세요...';
+
+  // Reset building scales
+  cityGroup.children.forEach(mesh => {
+    if (mesh.isMesh && mesh.geometry.type === 'BoxGeometry' && mesh.userData && mesh.userData.h !== undefined) {
+      mesh.scale.set(1, 0.01, 1);
+      mesh.position.y = (mesh.userData.h * 0.01) / 2;
+    }
+  });
 }
 
 // ── Exit ───────────────────────────────────────────────────────
