@@ -24,13 +24,18 @@
     }
     .sub { color:rgba(255,255,255,.45); font-size:.85rem; letter-spacing:.12em; text-transform:uppercase; margin-bottom:2.5rem; }
 
-    #start-btn {
+    #start-btn, .btn-style-ios {
       padding:1rem 2.5rem; font-size:1.1rem; font-weight:700; color:#fff; border:none; border-radius:50px; cursor:pointer;
       background:linear-gradient(135deg,#00f5d4,#9b5de5);
       box-shadow:0 0 30px rgba(0,245,212,.4),0 0 60px rgba(155,93,229,.2);
       transition:transform .2s,box-shadow .2s;
+      text-decoration:none; display:inline-block;
     }
-    #start-btn:active { transform:scale(.96); }
+    #start-btn:active, .btn-style-ios:active { transform:scale(.96); }
+    .btn-style-ios.disabled {
+      opacity:0.5;
+      pointer-events:none;
+    }
 
     .steps { margin-top:2rem; color:rgba(255,255,255,.35); font-size:.78rem; line-height:2; text-align:center; }
     .steps b { color:rgba(0,245,212,.7); }
@@ -78,7 +83,9 @@
 <div id="overlay">
   <div class="title">DeskCity</div>
   <div class="sub">AR · 나만의 도시를 현실에</div>
-  <button id="start-btn" onclick="startAR()">📷 AR 시작하기</button>
+  <div id="btn-container">
+    <button id="start-btn" onclick="startAR()">📷 AR 시작하기</button>
+  </div>
   <div class="steps">
     <b>1.</b> 버튼을 누르면 카메라 권한을 요청합니다<br>
     <b>2.</b> 카메라로 바닥이나 책상을 비추세요<br>
@@ -407,11 +414,17 @@ window.addEventListener('load', async () => {
   const startBtn = document.getElementById('start-btn');
 
   if (isIOS) {
+    const container = document.getElementById('btn-container');
+    container.innerHTML = `
+      <a id="start-btn-link" rel="ar" href="#" style="text-decoration:none; display:inline-block;">
+        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;">
+        <div id="start-btn-ios" class="btn-style-ios disabled">⏳ AR 준비 중...</div>
+      </a>
+    `;
+
     note.textContent = '⏳ iOS 기기가 감지되었습니다. AR 모델을 생성하는 중...';
     note.style.borderColor = 'rgba(255,200,0,.3)';
     note.style.color = 'rgba(255,200,0,.8)';
-    startBtn.textContent = '⏳ AR 준비 중...';
-    startBtn.disabled = true;
 
     try {
       // Build the city group so we can export it
@@ -422,17 +435,25 @@ window.addEventListener('load', async () => {
       const blob = new Blob([arrayBuffer], { type: 'model/vnd.usdz+zip' });
       usdzBlobUrl = URL.createObjectURL(blob);
 
+      // Link the href directly to our anchor
+      const link = document.getElementById('start-btn-link');
+      link.setAttribute('href', usdzBlobUrl);
+
+      // Enable the button
+      const btnIos = document.getElementById('start-btn-ios');
+      btnIos.textContent = '📷 AR 시작하기';
+      btnIos.classList.remove('disabled');
+
       note.textContent = '✅ iOS AR 준비 완료! 버튼을 눌러 시작하세요.';
       note.style.borderColor = 'rgba(0,245,212,.3)';
       note.style.color = 'rgba(0,245,212,.8)';
-      startBtn.textContent = '📷 AR 시작하기';
-      startBtn.disabled = false;
     } catch (e) {
       console.error('USDZ Export failed:', e);
       note.textContent = '⚠ iOS AR 구성에 실패했습니다: ' + e.message;
       note.style.borderColor = 'rgba(255,80,80,.4)';
       note.style.color = 'rgba(255,120,120,.8)';
-      startBtn.textContent = '📷 AR 시작하기 (오류)';
+      const btnIos = document.getElementById('start-btn-ios');
+      btnIos.textContent = '📷 AR 시작하기 (오류)';
     }
     return;
   }
