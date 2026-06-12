@@ -307,6 +307,7 @@ import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/
 const State = { IDLE:'idle', SCANNING:'scanning', PLACING:'placing', PLACED:'placed' };
 let state = State.IDLE;
 let isSimulator = false;
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 let renderer, scene, camera;
 let xrSession = null, refSpace = null, hitSource = null;
