@@ -81,10 +81,67 @@
       transition:stroke-dashoffset .05s linear; stroke-linecap:round;
     }
 
+    /* Settings panel styling */
+    #settings-btn {
+      position: fixed; top: 15px; right: 15px; z-index: 30;
+      background: rgba(255,255,255,0.15); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.25); border-radius: 50%;
+      width: 45px; height: 45px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; color: #fff; font-size: 1.3rem; transition: transform 0.3s;
+    }
+    #settings-btn:active { transform: scale(0.9); }
+    #settings-panel {
+      position: fixed; top: 75px; right: 15px; z-index: 30;
+      background: rgba(13,13,26,0.92); backdrop-filter: blur(15px);
+      border: 1px solid rgba(255,255,255,0.15); border-radius: 16px;
+      width: 260px; padding: 1.2rem; display: none; flex-direction: column; gap: 0.8rem;
+      color: #fff; font-size: 0.9rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    #settings-panel.visible { display: flex; }
+    #settings-panel h3 { font-size: 1rem; border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 0.4rem; margin-bottom: 0.2rem; color: #00f5d4; }
+    .settings-row { display: flex; justify-content: space-between; align-items: center; }
+    .settings-btn-item {
+      background: linear-gradient(135deg, #00f5d4, #9b5de5); border: none; border-radius: 8px;
+      color: #fff; padding: 0.4rem 0.8rem; font-weight: bold; cursor: pointer; font-size: 0.8rem;
+      transition: transform 0.1s;
+    }
+    .settings-btn-item:active { transform: scale(0.95); }
+
+    /* Scan progress HUD styling */
+    #scan-progress-container {
+      position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%);
+      width: 85%; max-width: 320px; background: rgba(0,0,0,0.65); backdrop-filter: blur(12px);
+      border-radius: 12px; padding: 0.9rem 1.1rem; display: none; flex-direction: column; gap: 0.5rem;
+      z-index: 15; text-align: center; border: 1px solid rgba(255,255,255,0.1);
+    }
+    #scan-progress-container.visible { display: flex; }
+    .progress-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; overflow: hidden; }
+    .progress-bar-fg { width: 0%; height: 100%; background: linear-gradient(90deg, #00f5d4, #9b5de5); border-radius: 3px; transition: width 0.1s; }
+    #scan-status-text { color: #fff; font-size: 0.85rem; font-weight: bold; }
+    #scan-sub-text { color: rgba(255,255,255,0.5); font-size: 0.72rem; }
+
     canvas { display:block; }
   </style>
 </head>
 <body>
+
+<!-- Settings UI -->
+<button id="settings-btn" onclick="toggleSettings()">⚙️</button>
+<div id="settings-panel">
+  <h3>관리자 설정</h3>
+  <div class="settings-row">
+    <span>기상청 날씨 연동:</span>
+    <button class="settings-btn-item" onclick="fetchRealWeather()">연동</button>
+  </div>
+  <div class="settings-row">
+    <span>수동 날씨 변경:</span>
+    <div>
+      <button class="settings-btn-item" onclick="setManualWeather('sun')" style="padding: 0.3rem 0.5rem; margin-right:0.3rem;">☀️ 맑음</button>
+      <button class="settings-btn-item" onclick="setManualWeather('rain')" style="padding: 0.3rem 0.5rem;">🌧️ 비</button>
+    </div>
+  </div>
+  <div id="weather-status" style="font-size: 0.8rem; color: rgba(255,255,255,0.6); text-align: center; margin-top: 0.3rem;">현재 날씨: ☀️ 맑음</div>
+</div>
 
 <!-- Start overlay -->
 <div id="overlay">
@@ -109,10 +166,20 @@
   <button id="exit-btn" onclick="exitAR()">AR 종료</button>
 </div>
 
+<!-- Scanning progress HUD -->
+<div id="scan-progress-container">
+  <div id="scan-status-text">바닥을 스캔하는 중... (0%)</div>
+  <div class="progress-bar-bg">
+    <div class="progress-bar-fg" id="scan-progress-fg"></div>
+  </div>
+  <div id="scan-sub-text">스마트폰을 들고 주변 바닥을 천천히 8자로 흔들어주세요</div>
+</div>
+
 <!-- Hold ring -->
 <div id="hold-ring">
   <svg viewBox="0 0 60 60"><circle class="bg" cx="30" cy="30" r="27"/><circle class="fg" id="hold-fg" cx="30" cy="30" r="27"/></svg>
 </div>
+
 
 <script type="module">
 /* ─────────────────────────────────────────────────────────────────
@@ -147,6 +214,14 @@ let pointer = {x:.5, y:.5};   // normalised screen coords of first touch
 
 let usdzBlobUrl = null;
 let dioramaModel = null;
+let rainParticles = null;
+let rainGeometry = null;
+const rainCount = 200;
+let sunMesh = null;
+
+let scanProgressVal = 0;
+let scanInterval = null;
+
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // ── Three.js Setup ─────────────────────────────────────────────
@@ -180,7 +255,13 @@ function initThree() {
   }
   cityGroup.visible = false;
   scene.add(cityGroup);
+
+  // Create weather effects
+  createRain();
+  createSun();
+  setWeather('sun');
 }
+
 
 function buildReticle() {
   const g = new THREE.RingGeometry(.12,.15,36).rotateX(-Math.PI/2);
@@ -213,8 +294,140 @@ function loadDioramaModel() {
   });
 }
 
+function createRain() {
+  if (rainParticles) return;
+  rainGeometry = new THREE.BufferGeometry();
+  const positions = [];
+  const velocities = [];
+  
+  for (let i = 0; i < rainCount; i++) {
+    // Rain spawns in a box above the diorama (width/depth: 0.3m, height: 0.3m to 0.8m)
+    const x = (Math.random() - 0.5) * 0.3;
+    const y = 0.4 + Math.random() * 0.4;
+    const z = (Math.random() - 0.5) * 0.3;
+    positions.push(x, y, z);
+    // falling down speed
+    velocities.push(0, -0.006 - Math.random() * 0.008, 0); 
+  }
+  
+  rainGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  rainGeometry.userData = { velocities };
+  
+  const rainMaterial = new THREE.PointsMaterial({
+    color: 0x88ccff,
+    size: 0.004,
+    transparent: true,
+    opacity: 0.85
+  });
+  
+  rainParticles = new THREE.Points(rainGeometry, rainMaterial);
+  rainParticles.visible = false;
+  cityGroup.add(rainParticles);
+}
+
+function updateRain() {
+  if (!rainParticles || !rainParticles.visible) return;
+  const positions = rainGeometry.attributes.position.array;
+  const velocities = rainGeometry.userData.velocities;
+  
+  for (let i = 0; i < rainCount; i++) {
+    const idx = i * 3;
+    positions[idx + 1] += velocities[i].y;
+    
+    // Reset if it hits or goes below ground (y < 0)
+    if (positions[idx + 1] < 0) {
+      positions[idx + 1] = 0.4 + Math.random() * 0.3;
+      positions[idx] = (Math.random() - 0.5) * 0.3;
+      positions[idx + 2] = (Math.random() - 0.5) * 0.3;
+    }
+  }
+  rainGeometry.attributes.position.needsUpdate = true;
+}
+
+function createSun() {
+  if (sunMesh) return;
+  const sunGroup = new THREE.Group();
+  
+  // Golden yellow sphere
+  const geo = new THREE.SphereGeometry(0.018, 16, 16);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+  const sphere = new THREE.Mesh(geo, mat);
+  sunGroup.add(sphere);
+  
+  // Sun aura ring
+  const ringGeo = new THREE.RingGeometry(0.022, 0.028, 32);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffdd44, side: THREE.DoubleSide, transparent: true, opacity: 0.4 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = Math.PI / 4;
+  sunGroup.add(ring);
+  
+  sunMesh = sunGroup;
+  // Position above the diorama
+  sunMesh.position.set(0.12, 0.32, 0.12);
+  sunMesh.visible = false;
+  cityGroup.add(sunMesh);
+}
+
+function setWeather(type) {
+  const statusDiv = document.getElementById('weather-status');
+  if (statusDiv) statusDiv.textContent = `현재 날씨: ${type === 'rain' ? '🌧️ 비' : '☀️ 맑음'}`;
+  
+  if (type === 'rain') {
+    if (rainParticles) rainParticles.visible = true;
+    if (sunMesh) sunMesh.visible = false;
+    scene.background = null;
+  } else {
+    if (rainParticles) rainParticles.visible = false;
+    if (sunMesh) sunMesh.visible = true;
+    scene.background = null;
+  }
+}
+
+// Bind admin settings panel functions globally
+window.toggleSettings = () => {
+  const panel = document.getElementById('settings-panel');
+  if (panel) panel.classList.toggle('visible');
+};
+
+window.setManualWeather = (type) => {
+  setWeather(type);
+};
+
+window.fetchRealWeather = async () => {
+  const statusDiv = document.getElementById('weather-status');
+  if (statusDiv) statusDiv.textContent = '⏳ 날씨 정보 가져오는 중...';
+  
+  try {
+    // OpenWeatherMap API call with coordinates of Seoul
+    const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=37.5665&longitude=126.9780&current_weather=true');
+    const data = await res.json();
+    if (data && data.current_weather) {
+      const temp = data.current_weather.temperature;
+      const code = data.current_weather.weathercode;
+      
+      // Open-meteo weather codes: rain is 51, 53, 55, 61, 63, 65, 80, 81, 82 etc.
+      const isRainy = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code);
+      setWeather(isRainy ? 'rain' : 'sun');
+      if (statusDiv) {
+        statusDiv.textContent = `현재 날씨(서울): ${isRainy ? '🌧️ 비' : '☀️ 맑음'} (${temp}°C)`;
+      }
+    } else {
+      throw new Error('Invalid weather data format');
+    }
+  } catch (e) {
+    console.warn('Real weather fetch failed, using fallback:', e);
+    // Fallback: check current hours (night/day or random)
+    const isRainyFallback = Math.random() > 0.5;
+    setWeather(isRainyFallback ? 'rain' : 'sun');
+    if (statusDiv) {
+      statusDiv.textContent = `현재 날씨(로컬): ${isRainyFallback ? '🌧️ 비' : '☀️ 맑음'} (API 연결 실패)`;
+    }
+  }
+};
+
 
 // ── Start AR ───────────────────────────────────────────────────
+
 window.startAR = async () => {
   if (isIOS) {
     if (!usdzBlobUrl) {
@@ -268,6 +481,28 @@ window.startAR = async () => {
   document.getElementById('overlay').classList.add('hidden');
   document.getElementById('ar-hud').classList.add('visible');
 
+  // Initialize and show Scanning Progress HUD
+  const scanHUD = document.getElementById('scan-progress-container');
+  const scanFG = document.getElementById('scan-progress-fg');
+  const scanText = document.getElementById('scan-status-text');
+  
+  scanProgressVal = 0;
+  if (scanHUD) scanHUD.classList.add('visible');
+  if (scanFG) scanFG.style.width = '0%';
+  if (scanText) scanText.textContent = '바닥을 스캔하는 중... (0%)';
+  
+  if (scanInterval) clearInterval(scanInterval);
+  scanInterval = setInterval(() => {
+    if (state === State.SCANNING) {
+      if (scanProgressVal < 92) {
+        scanProgressVal += Math.random() * 3 + 1.5;
+        scanProgressVal = Math.min(scanProgressVal, 92);
+        if (scanFG) scanFG.style.width = `${scanProgressVal}%`;
+        if (scanText) scanText.textContent = `바닥을 스캔하는 중... (${Math.floor(scanProgressVal)}%)`;
+      }
+    }
+  }, 180);
+
   state = State.SCANNING;
 
   // Input: touch
@@ -284,6 +519,9 @@ function onFrame(time, frame) {
   if (!frame) return;
   const hits = frame.getHitTestResults(hitSource);
   const hint = document.getElementById('hint');
+
+  // Update rain animation if active
+  updateRain();
 
   if (state === State.PLACED) {
     // Keep city at placed matrix
@@ -321,6 +559,17 @@ function onFrame(time, frame) {
         state = State.PLACING;
         cityGroup.visible = true;
         hint.textContent = '탭하여 도시를 배치하세요!';
+
+        // Complete Scanning Progress Bar
+        if (scanInterval) clearInterval(scanInterval);
+        const scanFGObj = document.getElementById('scan-progress-fg');
+        const scanTextObj = document.getElementById('scan-status-text');
+        const scanHUDObj = document.getElementById('scan-progress-container');
+        if (scanFGObj) scanFGObj.style.width = '100%';
+        if (scanTextObj) scanTextObj.textContent = '스캔 완료! (100%)';
+        setTimeout(() => {
+          if (scanHUDObj) scanHUDObj.classList.remove('visible');
+        }, 1000);
       }
 
       // City preview follows reticle
@@ -336,6 +585,7 @@ function onFrame(time, frame) {
 
   renderer.render(scene, camera);
 }
+
 
 // ── Touch Input ────────────────────────────────────────────────
 function onTouchStart(e) {
