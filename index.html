@@ -119,7 +119,16 @@
    DeskCity AR  —  Standalone WebXR + Three.js + iOS Quick Look
    Surface detection via hit-test on Android.
    USDZExporter dynamically compiled for iOS AR Quick Look.
-───────────────────────────────────────────────────────────────── */
+ ───────────────────────────────────────────────────────────────── */
+
+// Bind setStatus globally to prevent C# runtime errors during WebGL execution
+window.setStatus = function(msg) {
+  const hint = document.getElementById('hint');
+  if (hint) {
+    hint.textContent = msg;
+  }
+  console.log("[Status]:", msg);
+};
 
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
 import { USDZExporter } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/exporters/USDZExporter.js';

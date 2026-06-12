@@ -252,6 +252,70 @@
   </div>
 
   <script>
+    // Global setStatus function to receive state messages from Unity WebGL
+    function setStatus(msg) {
+      const statusLabel = document.getElementById("clutter-status");
+      if (statusLabel) {
+        statusLabel.textContent = msg;
+        
+        // Update color themes based on the status text
+        if (msg.includes("FOUND") || msg.includes("Found") || msg.includes("Completed") || msg.includes("FOUND!")) {
+          statusLabel.style.color = "#00ff88"; // Green
+          const hudText = document.querySelector(".hud-scanner-text");
+          if (hudText) {
+            hudText.textContent = msg.toUpperCase();
+            hudText.style.color = "#00ff88";
+            hudText.style.textShadow = "0 0 8px rgba(0, 255, 136, 0.5)";
+          }
+          const scannerRing = document.querySelector(".hud-scanner");
+          if (scannerRing) {
+            scannerRing.style.borderColor = "rgba(0, 255, 136, 0.5)";
+          }
+          const centerDot = document.querySelector(".hud-reticle-center");
+          if (centerDot) {
+            centerDot.style.backgroundColor = "#00ff88";
+            centerDot.style.boxShadow = "0 0 10px #00ff88";
+          }
+        } else if (msg.includes("Print") || msg.includes("PRINT") || msg.includes("Printing") || msg.includes("PRINTING")) {
+          statusLabel.style.color = "#58a6ff"; // Blue
+          const hudText = document.querySelector(".hud-scanner-text");
+          if (hudText) {
+            hudText.textContent = msg.toUpperCase();
+            hudText.style.color = "#58a6ff";
+            hudText.style.textShadow = "0 0 8px rgba(88, 166, 255, 0.5)";
+          }
+          const scannerRing = document.querySelector(".hud-scanner");
+          if (scannerRing) {
+            scannerRing.style.borderColor = "rgba(88, 166, 255, 0.3)";
+          }
+          const centerDot = document.querySelector(".hud-reticle-center");
+          if (centerDot) {
+            centerDot.style.backgroundColor = "#58a6ff";
+            centerDot.style.boxShadow = "0 0 10px #58a6ff";
+          }
+        } else {
+          statusLabel.style.color = "#00d2ff"; // Cyan
+          const hudText = document.querySelector(".hud-scanner-text");
+          if (hudText) {
+            hudText.textContent = msg.toUpperCase();
+            hudText.style.color = "#00d2ff";
+            hudText.style.textShadow = "0 0 8px rgba(0, 210, 255, 0.5)";
+          }
+          const scannerRing = document.querySelector(".hud-scanner");
+          if (scannerRing) {
+            scannerRing.style.borderColor = "rgba(0, 210, 255, 0.3)";
+          }
+          const centerDot = document.querySelector(".hud-reticle-center");
+          if (centerDot) {
+            centerDot.style.backgroundColor = "#00d2ff";
+            centerDot.style.boxShadow = "0 0 10px #00d2ff";
+          }
+        }
+      }
+      console.log("[Status]:", msg);
+    }
+    window.setStatus = setStatus;
+
     // Custom WebXR hit test component to handle scanning guide & 3D print trigger
     AFRAME.registerComponent('ar-hit-test-custom', {
       schema: {
@@ -424,7 +488,7 @@
     <a-light type="ambient" intensity="0.6"></a-light>
 
     <!-- Diorama Anchor (Root) -->
-    <a-entity id="diorama-root" position="0 0 0" visible="true">
+    <a-entity id="diorama-root" position="0 0 0" scale="0.1 0.1 0.1" visible="true">
       
       <!-- Holographic Scanning Guide Reticle -->
       <a-entity id="scan-reticle" position="0 0.01 0">
