@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>DeskCity AR</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#000; font-family:-apple-system,sans-serif; overflow:hidden; width:100vw; height:100vh; }
+
+    #overlay {
+      position:fixed; inset:0; z-index:10;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      background:linear-gradient(135deg,#0d0d1a,#1a0d2e,#0d1a1a);
+      transition:opacity .5s;
+    }
+    #overlay.hidden { opacity:0; pointer-events:none; }
+
+    .title {
+      font-size:2.8rem; font-weight:800;
+      background:linear-gradient(135deg,#00f5d4,#9b5de5,#f15bb5);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      background-clip:text; margin-bottom:.4rem;
+    }
+    .sub { color:rgba(255,255,255,.45); font-size:.85rem; letter-spacing:.12em; text-transform:uppercase; margin-bottom:2.5rem; }
+
+    #start-btn {
+      padding:1rem 2.5rem; font-size:1.1rem; font-weight:700; color:#fff; border:none; border-radius:50px; cursor:pointer;
+      background:linear-gradient(135deg,#00f5d4,#9b5de5);
+      box-shadow:0 0 30px rgba(0,245,212,.4),0 0 60px rgba(155,93,229,.2);
+      transition:transform .2s,box-shadow .2s;
+    }
+    #start-btn:active { transform:scale(.96); }
+
+    .steps { margin-top:2rem; color:rgba(255,255,255,.35); font-size:.78rem; line-height:2; text-align:center; }
+    .steps b { color:rgba(0,245,212,.7); }
+
+    #support-note {
+      margin-top:1.5rem; padding:.5rem 1.2rem;
+      background:rgba(255,200,0,.08); border:1px solid rgba(255,200,0,.2);
+      border-radius:8px; color:rgba(255,200,0,.7); font-size:.72rem; text-align:center;
+    }
+
+    /* AR HUD */
+    #ar-hud {
+      position:fixed; bottom:0; left:0; right:0; z-index:10;
+      display:none; flex-direction:column; align-items:center; padding-bottom:2.5rem; gap:.8rem;
+    }
+    #ar-hud.visible { display:flex; }
+    #hint {
+      background:rgba(0,0,0,.55); backdrop-filter:blur(12px);
+      color:#fff; font-size:.9rem; padding:.55rem 1.4rem; border-radius:24px;
+    }
+    #exit-btn {
+      background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25);
+      color:#fff; padding:.55rem 1.8rem; border-radius:20px; font-size:.8rem; cursor:pointer;
+    }
+
+    /* Hold progress ring */
+    #hold-ring {
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      width:70px; height:70px; display:none; z-index:20;
+    }
+    #hold-ring svg { width:100%; height:100%; transform:rotate(-90deg); }
+    #hold-ring circle.bg { fill:none; stroke:rgba(255,255,255,.15); stroke-width:5; }
+    #hold-ring circle.fg {
+      fill:none; stroke:#00f5d4; stroke-width:5;
+      stroke-dasharray:188; stroke-dashoffset:188;
+      transition:stroke-dashoffset .05s linear; stroke-linecap:round;
+    }
+
+    canvas { display:block; }
+  </style>
+</head>
+<body>
+
+<!-- Start overlay -->
+<div id="overlay">
+  <div class="title">DeskCity</div>
+  <div class="sub">AR · 나만의 도시를 현실에</div>
+  <button id="start-btn" onclick="startAR()">📷 AR 시작하기</button>
+  <div class="steps">
+    <b>1.</b> 버튼을 누르면 카메라 권한을 요청합니다<br>
+    <b>2.</b> 카메라로 바닥이나 책상을 비추세요<br>
+    <b>3.</b> 초록 링이 나타나면 탭하여 도시 배치<br>
+    <b>4.</b> 걸어다니며 외부에서 탐험하세요!<br>
+    <br><b>재배치</b> → 1.5초 길게 누르기
+  </div>
+  <div id="support-note">Android Chrome 또는 iOS Safari 17+에서 동작합니다</div>
+</div>
+
+<!-- In-AR HUD -->
+<div id="ar-hud">
+  <div id="hint">📍 바닥을 비추면 초록 링이 나타납니다. 탭하여 배치!</div>
+  <button id="exit-btn" onclick="exitAR()">AR 종료</button>
+</div>
+
+<!-- Hold ring -->
+<div id="hold-ring">
+  <svg viewBox="0 0 60 60"><circle class="bg" cx="30" cy="30" r="27"/><circle class="fg" id="hold-fg" cx="30" cy="30" r="27"/></svg>
+</div>
+
+<script type="module">
+/* ─────────────────────────────────────────────────────────────────
+   DeskCity AR  —  Standalone WebXR + Three.js
+   Surface detection via hit-test, city locked in world space.
+───────────────────────────────────────────────────────────────── */
+
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
+
+// ── State ─────────────────────────────────────────────────────
+const State = { IDLE:'idle', SCANNING:'scanning', PLACING:'placing', PLACED:'placed' };
+let state = State.IDLE;
+
+let renderer, scene, camera;
+let xrSession = null, refSpace = null, hitSource = null;
+let reticle, cityGroup, placedMatrix = null;
+
+let holdStart = 0, holdActive = false;
+let pointer = {x:.5, y:.5};   // normalised screen coords of first touch
+
+// ── Three.js Setup ─────────────────────────────────────────────
+function initThree() {
+  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  scene  = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, .01, 100);
+  scene.add(camera);
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0xffffff, .7));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  dir.position.set(2,4,3); scene.add(dir);
+
+  // Reticle (placement ring)
+  reticle = buildReticle();
+  reticle.visible = false;
+  scene.add(reticle);
+
+  // City group (stays hidden until placed)
+  cityGroup = buildCity();
+  cityGroup.visible = false;
+  scene.add(cityGroup);
+}
+
+function buildReticle() {
+  const g = new THREE.RingGeometry(.12,.15,36).rotateX(-Math.PI/2);
+  const m = new THREE.MeshBasicMaterial({ color:0x00f5d4, side:THREE.DoubleSide, transparent:true, opacity:.85 });
+  return new THREE.Mesh(g, m);
+}
+
+function buildCity() {
+  const group = new THREE.Group();
+  const palette = [0x6c63ff, 0x00f5d4, 0xf15bb5, 0xffd166, 0x06d6a0];
+  const baseGeo = new THREE.BoxGeometry(1,1,1);
+
+  // Grid of buildings
+  const cols=4, rows=4, spacing=.055;
+  for (let x=0; x<cols; x++) for (let z=0; z<rows; z++) {
+    const h = .04 + Math.random()*.14;
+    const w = .03 + Math.random()*.02;
+    const geo = new THREE.BoxGeometry(w, h, w);
+    const mat = new THREE.MeshPhongMaterial({
+      color: palette[Math.floor(Math.random()*palette.length)],
+      emissive: 0x111111, shininess: 40
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    const ox = (x - (cols-1)/2) * spacing;
+    const oz = (z - (rows-1)/2) * spacing;
+    mesh.position.set(ox, h/2, oz);
+    group.add(mesh);
+  }
+
+  // Base plate
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(.25,.004,.25),
+    new THREE.MeshPhongMaterial({color:0x1a1a2e})
+  );
+  base.position.y = -.002;
+  group.add(base);
+
+  // Road grid lines
+  const lineMat = new THREE.LineBasicMaterial({color:0xffffff, opacity:.3, transparent:true});
+  [-1,0,1].forEach(i => {
+    const pts = [new THREE.Vector3(i*.06,0,-.12), new THREE.Vector3(i*.06,0,.12)];
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+    const pts2 = [new THREE.Vector3(-.12,0,i*.06), new THREE.Vector3(.12,0,i*.06)];
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2), lineMat));
+  });
+
+  return group;
+}
+
+// ── Start AR ───────────────────────────────────────────────────
+window.startAR = async () => {
+  initThree();
+
+  // Check support
+  if (!navigator.xr) { alert('WebXR를 지원하지 않는 브라우저입니다.\nAndroid Chrome을 사용해주세요.'); return; }
+  const supported = await navigator.xr.isSessionSupported('immersive-ar');
+  if (!supported) { alert('AR 기능을 지원하지 않는 기기입니다.\nARCore 지원 기기가 필요합니다.'); return; }
+
+  // Update support note UI
+  const note = document.getElementById('support-note');
+  note.textContent = '✅ AR 지원 확인됨! 시작합니다...';
+  note.style.color = 'rgba(0,245,212,.8)';
+
+  try {
+    xrSession = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['hit-test'],
+      optionalFeatures: ['dom-overlay', 'light-estimation'],
+      domOverlay: { root: document.body }
+    });
+  } catch(e) {
+    console.warn('AR session failed:', e);
+    alert('AR 세션을 시작할 수 없습니다: ' + e.message);
+    return;
+  }
+
+  renderer.xr.setSession(xrSession);
+  refSpace = await xrSession.requestReferenceSpace('local');
+  const viewerSpace = await xrSession.requestReferenceSpace('viewer');
+  hitSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+
+  // Show AR HUD, hide overlay
+  document.getElementById('overlay').classList.add('hidden');
+  document.getElementById('ar-hud').classList.add('visible');
+
+  state = State.SCANNING;
+
+  // Input: touch
+  renderer.domElement.addEventListener('touchstart', onTouchStart, {passive:false});
+  renderer.domElement.addEventListener('touchend',   onTouchEnd);
+  renderer.domElement.addEventListener('touchmove',  onTouchMove,  {passive:false});
+
+  xrSession.addEventListener('end', onSessionEnd);
+  renderer.setAnimationLoop(onFrame);
+};
+
+// ── XR Frame ───────────────────────────────────────────────────
+function onFrame(time, frame) {
+  if (!frame) return;
+  const hits = frame.getHitTestResults(hitSource);
+  const hint = document.getElementById('hint');
+
+  if (state === State.PLACED) {
+    // Keep city at placed matrix
+    if (placedMatrix) cityGroup.matrix.fromArray(placedMatrix);
+    cityGroup.matrixAutoUpdate = false;
+    // Slow rotation for ambiance
+    cityGroup.rotation.y += .003;
+
+    // Hold-to-reset ring
+    if (holdActive) {
+      const elapsed = (performance.now() - holdStart) / 1000;
+      const pct = Math.min(elapsed / 1.5, 1);
+      const ring = document.getElementById('hold-fg');
+      ring.style.strokeDashoffset = 188 * (1-pct);
+      if (pct >= 1) resetPlacement();
+    }
+
+    renderer.render(scene, camera);
+    return;
+  }
+
+  // SCANNING / PLACING
+  if (hits.length > 0) {
+    const pose = hits[0].getPose(refSpace);
+    if (pose) {
+      reticle.visible = true;
+      reticle.matrix.fromArray(pose.transform.matrix);
+      reticle.matrixAutoUpdate = false;
+
+      // Pulse
+      const s = 1 + Math.sin(time * .004) * .06;
+      reticle.scale.set(s, s, s);
+
+      if (state === State.SCANNING) {
+        state = State.PLACING;
+        cityGroup.visible = true;
+        hint.textContent = '탭하여 도시를 배치하세요!';
+      }
+
+      // City preview follows reticle
+      if (state === State.PLACING) {
+        cityGroup.matrix.copy(reticle.matrix);
+        cityGroup.matrixAutoUpdate = false;
+      }
+    }
+  } else {
+    reticle.visible = false;
+    if (state === State.PLACING) hint.textContent = '📍 바닥이나 책상을 비춰주세요...';
+  }
+
+  renderer.render(scene, camera);
+}
+
+// ── Touch Input ────────────────────────────────────────────────
+function onTouchStart(e) {
+  e.preventDefault();
+  if (state === State.PLACING && reticle.visible) {
+    placeCity();
+    return;
+  }
+  if (state === State.PLACED) {
+    holdActive = true;
+    holdStart = performance.now();
+    document.getElementById('hold-ring').style.display = 'block';
+  }
+}
+function onTouchEnd(e) {
+  holdActive = false;
+  document.getElementById('hold-ring').style.display = 'none';
+  document.getElementById('hold-fg').style.strokeDashoffset = 188;
+}
+function onTouchMove(e) { e.preventDefault(); }
+
+// ── Placement ──────────────────────────────────────────────────
+function placeCity() {
+  placedMatrix = Array.from(cityGroup.matrix.elements);
+  cityGroup.matrixAutoUpdate = false;
+  state = State.PLACED;
+  reticle.visible = false;
+
+  document.getElementById('hint').textContent = '✅ 도시가 배치됐어요! 걸어다니며 탐험하세요.';
+  setTimeout(() => {
+    document.getElementById('ar-hud').style.opacity = '0';
+    document.getElementById('ar-hud').style.transition = 'opacity .5s';
+  }, 3000);
+
+  // Build effect: animate buildings up
+  cityGroup.children.forEach((mesh, i) => {
+    if (mesh.isMesh && mesh.geometry.type === 'BoxGeometry') {
+      const targetY = mesh.position.y;
+      mesh.position.y -= .2;
+      const delay = i * 60;
+      setTimeout(() => {
+        let elapsed = 0;
+        const interval = setInterval(() => {
+          elapsed += 16;
+          const t = Math.min(elapsed/400, 1);
+          const ease = 1 - Math.pow(1-t, 3);
+          mesh.position.y = (-0.2) + (targetY + 0.2) * ease;
+          if (t >= 1) clearInterval(interval);
+        }, 16);
+      }, delay);
+    }
+  });
+}
+
+function resetPlacement() {
+  state = State.SCANNING;
+  placedMatrix = null;
+  cityGroup.visible = false;
+  cityGroup.matrixAutoUpdate = true;
+  holdActive = false;
+  document.getElementById('hold-ring').style.display = 'none';
+  document.getElementById('ar-hud').style.opacity = '1';
+  document.getElementById('hint').textContent = '📍 바닥이나 책상을 비춰주세요...';
+}
+
+// ── Exit ───────────────────────────────────────────────────────
+window.exitAR = () => { if (xrSession) xrSession.end(); };
+
+function onSessionEnd() {
+  xrSession = null; hitSource = null; refSpace = null;
+  renderer.setAnimationLoop(null);
+  document.getElementById('ar-hud').classList.remove('visible');
+  document.getElementById('overlay').classList.remove('hidden');
+  document.getElementById('ar-hud').style.opacity = '1';
+  state = State.IDLE;
+  // Remove canvas
+  if (renderer?.domElement) renderer.domElement.remove();
+}
+
+// ── Support check on load ───────────────────────────────────────
+window.addEventListener('load', () => {
+  const note = document.getElementById('support-note');
+  if (!navigator.xr) {
+    note.textContent = '⚠ 이 브라우저는 WebXR를 지원하지 않습니다. Android Chrome을 사용해주세요.';
+    note.style.borderColor = 'rgba(255,80,80,.4)';
+    note.style.color = 'rgba(255,120,120,.8)';
+    return;
+  }
+  navigator.xr.isSessionSupported('immersive-ar').then(ok => {
+    if (ok) {
+      note.textContent = '✅ AR 지원 확인! 버튼을 눌러 시작하세요.';
+      note.style.borderColor = 'rgba(0,245,212,.3)';
+      note.style.color = 'rgba(0,245,212,.8)';
+    }
+  });
+});
+</script>
+</body>
+</html>

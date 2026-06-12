@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Desk Diorama - WebXR Mobile AR Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #0d1117;
+      color: #c9d1d9;
+    }
+    #ui-overlay {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 85%;
+      max-width: 400px;
+      background: rgba(22, 27, 34, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(240, 246, 252, 0.1);
+      border-radius: 16px;
+      padding: 16px;
+      z-index: 10;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      box-sizing: border-box;
+      pointer-events: auto;
+      transition: all 0.3s ease;
+    }
+    .title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      text-align: center;
+      color: #00d2ff;
+      letter-spacing: 0.5px;
+      text-shadow: 0 0 10px rgba(0, 210, 255, 0.4);
+    }
+    .subtitle {
+      font-size: 11px;
+      color: #8b949e;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+    .slider-container {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #c9d1d9;
+    }
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #30363d;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #00d2ff;
+      cursor: pointer;
+      box-shadow: 0 0 8px rgba(0, 210, 255, 0.6);
+      transition: transform 0.1s;
+    }
+    input[type=range]::-webkit-slider-thumb:active {
+      transform: scale(1.2);
+    }
+
+    /* Start AR Button */
+    #start-ar-btn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #00d2ff 0%, #0066ff 100%);
+      border: none;
+      border-radius: 12px;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 12px;
+      box-shadow: 0 4px 15px rgba(0, 210, 255, 0.4);
+      transition: all 0.3s ease;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      pointer-events: auto;
+    }
+    #start-ar-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 210, 255, 0.6);
+    }
+    #start-ar-btn:active {
+      transform: translateY(1px);
+    }
+
+    /* Screen Space Scanner HUD */
+    #hud-container {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 5;
+      box-sizing: border-box;
+      transition: opacity 0.5s ease;
+    }
+    
+    .hud-scanner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 220px;
+      height: 220px;
+      border: 2px dashed rgba(0, 210, 255, 0.3);
+      border-radius: 50%;
+      animation: pulse-ring 2s infinite ease-in-out;
+      transition: border-color 0.3s ease;
+    }
+
+    .hud-scanner::before {
+      content: '';
+      position: absolute;
+      top: -10px; left: -10px; right: -10px; bottom: -10px;
+      border: 2px solid rgba(0, 210, 255, 0.6);
+      border-radius: 50%;
+      border-top-color: transparent;
+      border-bottom-color: transparent;
+      animation: rotate-ring 4s infinite linear;
+    }
+
+    .hud-scanner::after {
+      content: '';
+      position: absolute;
+      top: 15px; left: 15px; right: 15px; bottom: 15px;
+      border: 1px solid rgba(0, 210, 255, 0.2);
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 210, 255, 0.05) 0%, transparent 70%);
+    }
+
+    .hud-reticle-center {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 12px;
+      height: 12px;
+      background-color: #00d2ff;
+      border-radius: 50%;
+      box-shadow: 0 0 10px #00d2ff;
+      animation: pulse-dot 1s infinite alternate;
+      transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .hud-crosshair-h {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 280px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(0, 210, 255, 0.4), transparent);
+    }
+
+    .hud-crosshair-v {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 1px;
+      height: 280px;
+      background: linear-gradient(180deg, transparent, rgba(0, 210, 255, 0.4), transparent);
+    }
+
+    .hud-scanner-text {
+      position: absolute;
+      top: calc(50% + 140px);
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      color: #00d2ff;
+      text-shadow: 0 0 8px rgba(0, 210, 255, 0.5);
+      animation: blink-text 1.5s infinite alternate;
+      white-space: nowrap;
+      transition: color 0.3s ease, text-shadow 0.3s ease;
+    }
+
+    @keyframes rotate-ring {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: translate(-50%, -50%) scale(0.95); opacity: 0.4; }
+      50% { transform: translate(-50%, -50%) scale(1.05); opacity: 0.8; }
+      100% { transform: translate(-50%, -50%) scale(0.95); opacity: 0.4; }
+    }
+
+    @keyframes pulse-dot {
+      0% { transform: translate(-50%, -50%) scale(0.8); }
+      100% { transform: translate(-50%, -50%) scale(1.2); }
+    }
+
+    @keyframes blink-text {
+      0% { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Bottom Control Overlay -->
+  <div id="ui-overlay">
+    <div class="title">Desk Diorama AR Test</div>
+    <div class="subtitle">UX/UI Pipeline with Scanning Guide & 3D Print</div>
+    
+    <div class="slider-container">
+      <div class="slider-label">
+        <span id="clutter-status">Scan Table Surface</span>
+        <span id="clutter-value">0.00 (0%)</span>
+      </div>
+      <input type="range" id="clutter-slider" min="0" max="1" step="0.01" value="0">
+    </div>
+    
+    <button id="start-ar-btn">Start AR Camera</button>
+  </div>
+
+  <!-- Screen Space holographic Scanner HUD -->
+  <div id="hud-container">
+    <div class="hud-crosshair-h"></div>
+    <div class="hud-crosshair-v"></div>
+    <div class="hud-scanner"></div>
+    <div class="hud-reticle-center"></div>
+    <div class="hud-scanner-text">SCANNING ENVIRONMENT...</div>
+  </div>
+
+  <script>
+    // Custom WebXR hit test component to handle scanning guide & 3D print trigger
+    AFRAME.registerComponent('ar-hit-test-custom', {
+      schema: {
+        target: { type: 'selector' },
+        reticle: { type: 'selector' }
+      },
+      init: function () {
+        this.xrHitTestSource = null;
+        this.viewerSpace = null;
+        this.printingStarted = false;
+        this.printProgress = 0;
+        
+        // Listen for AR mode enter
+        this.el.sceneEl.addEventListener('enter-vr', () => {
+          if (this.el.sceneEl.is('ar-mode')) {
+            console.log("AR Session started. Camera passthrough activated immediately.");
+            
+            // Hide normal overlay button, show HUD
+            document.getElementById("start-ar-btn").style.display = "none";
+            document.getElementById("hud-container").style.display = "block";
+            document.getElementById("hud-container").style.opacity = "1";
+            
+            document.getElementById("clutter-status").textContent = "Detecting desk surface...";
+            document.getElementById("clutter-status").style.color = "#00d2ff";
+            
+            const session = this.el.sceneEl.renderer.xr.getSession();
+            
+            // Trigger 3D printing on screen tap (select event)
+            session.addEventListener('select', () => {
+              if (this.xrHitTestSource && !this.printingStarted) {
+                this.printingStarted = true;
+                document.getElementById("clutter-status").textContent = "3D Printing...";
+                document.getElementById("clutter-status").style.color = "#58a6ff";
+                
+                // Hide target floor reticle and HUD
+                const hudText = document.querySelector(".hud-scanner-text");
+                if (hudText) {
+                  hudText.textContent = "PRINTING DIORAMA...";
+                  hudText.style.color = "#58a6ff";
+                }
+              }
+            });
+            
+            session.requestReferenceSpace('viewer').then((space) => {
+              this.viewerSpace = space;
+              session.requestHitTestSource({ space: this.viewerSpace }).then((source) => {
+                this.xrHitTestSource = source;
+              });
+            });
+          }
+        });
+
+        // Listen for AR mode exit
+        this.el.sceneEl.addEventListener('exit-vr', () => {
+          document.getElementById("start-ar-btn").style.display = "block";
+          document.getElementById("hud-container").style.display = "none";
+          document.getElementById("hud-container").style.opacity = "1";
+          document.getElementById("clutter-status").textContent = "Scan Table Surface";
+          document.getElementById("clutter-status").style.color = "#c9d1d9";
+          
+          // Reset status values
+          this.printingStarted = false;
+          this.printProgress = 0;
+          updatePrinting(0);
+          this.data.reticle.setAttribute('scale', '1 1 1');
+          this.data.reticle.setAttribute('visible', 'true');
+        });
+      },
+      tick: function () {
+        const frame = this.el.sceneEl.frame;
+        if (!frame || !this.xrHitTestSource) return;
+
+        if (!this.printingStarted) {
+          const referenceSpace = this.el.sceneEl.renderer.xr.getReferenceSpace();
+          const hitTestResults = frame.getHitTestResults(this.xrHitTestSource);
+
+          if (hitTestResults.length > 0) {
+            const pose = hitTestResults[0].getPose(referenceSpace);
+            const pos = pose.transform.position;
+            
+            // Place target diorama at detected surface position
+            this.data.target.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+            this.data.target.setAttribute('visible', 'true');
+            
+            document.getElementById("clutter-status").textContent = "Surface Found! Tap to Print";
+            document.getElementById("clutter-status").style.color = "#00ff88";
+            
+            // HUD feedback: Surface Found!
+            const hudText = document.querySelector(".hud-scanner-text");
+            if (hudText) {
+              hudText.textContent = "SURFACE FOUND! TAP TO PRINT";
+              hudText.style.color = "#00ff88";
+              hudText.style.textShadow = "0 0 8px rgba(0, 255, 136, 0.5)";
+            }
+            const scannerRing = document.querySelector(".hud-scanner");
+            if (scannerRing) {
+              scannerRing.style.borderColor = "rgba(0, 255, 136, 0.5)";
+            }
+            const centerDot = document.querySelector(".hud-reticle-center");
+            if (centerDot) {
+              centerDot.style.backgroundColor = "#00ff88";
+              centerDot.style.boxShadow = "0 0 10px #00ff88";
+            }
+          } else {
+            // Surface lost / scanning
+            document.getElementById("clutter-status").textContent = "Detecting desk surface...";
+            document.getElementById("clutter-status").style.color = "#00d2ff";
+            
+            const hudText = document.querySelector(".hud-scanner-text");
+            if (hudText) {
+              hudText.textContent = "SCANNING ENVIRONMENT...";
+              hudText.style.color = "#00d2ff";
+              hudText.style.textShadow = "0 0 8px rgba(0, 210, 255, 0.5)";
+            }
+            const scannerRing = document.querySelector(".hud-scanner");
+            if (scannerRing) {
+              scannerRing.style.borderColor = "rgba(0, 210, 255, 0.3)";
+            }
+            const centerDot = document.querySelector(".hud-reticle-center");
+            if (centerDot) {
+              centerDot.style.backgroundColor = "#00d2ff";
+              centerDot.style.boxShadow = "0 0 10px #00d2ff";
+            }
+          }
+        } else if (this.printProgress < 1.0) {
+          // 3D printing simulation loop
+          this.printProgress += 0.01;
+          if (this.printProgress >= 1.0) {
+            this.printProgress = 1.0;
+            document.getElementById("clutter-status").textContent = "Build Completed!";
+            document.getElementById("clutter-status").style.color = "#00ff88";
+          }
+          
+          document.getElementById("clutter-slider").value = this.printProgress;
+          document.getElementById("clutter-value").textContent = `${this.printProgress.toFixed(2)} (${Math.round(this.printProgress * 100)}%)`;
+          
+          // Grow buildings
+          updatePrinting(this.printProgress);
+
+          // Fade out and remove scan guide UI
+          const fade = Math.max(0, 1.0 - this.printProgress);
+          this.data.reticle.setAttribute('scale', `${fade} ${fade} ${fade}`);
+          if (fade === 0) {
+            this.data.reticle.setAttribute('visible', 'false');
+          }
+          
+          // Fade out and remove screen HUD
+          const hudContainer = document.getElementById("hud-container");
+          if (hudContainer) {
+            hudContainer.style.opacity = fade;
+            if (fade === 0) {
+              hudContainer.style.display = "none";
+            }
+          }
+        }
+      }
+    });
+  </script>
+
+  <!-- Force handheld single-screen AR (immersive-ar) only, disable VR entirely -->
+  <a-scene 
+    webxr="allowedModes: ar; referenceSpaceType: local-floor; requiredFeatures: hit-test;"
+    ar-hit-test-custom="target: #diorama-root; reticle: #scan-reticle;"
+    renderer="colorManagement: true; antialias: true;"
+    vr-mode-ui="enabled: false">
+
+    <!-- Camera & Lighting -->
+    <a-entity camera position="0 2 3.5" look-controls></a-entity>
+    <a-light type="directional" intensity="1.2" position="2 4 3" castShadow="true"></a-light>
+    <a-light type="ambient" intensity="0.6"></a-light>
+
+    <!-- Diorama Anchor (Root) -->
+    <a-entity id="diorama-root" position="0 0 0" visible="true">
+      
+      <!-- Holographic Scanning Guide Reticle -->
+      <a-entity id="scan-reticle" position="0 0.01 0">
+        <!-- Outer spinning futuristic ring -->
+        <a-ring color="#00d2ff" radius-inner="0.65" radius-outer="0.7" rotation="-90 0 0"
+                material="shader: flat; transparent: true; opacity: 0.8"
+                animation="property: rotation; to: -90 360 0; loop: true; dur: 4000; easing: linear">
+        </a-ring>
+        <!-- Inner pulsing guide circle -->
+        <a-ring color="#00d2ff" radius-inner="0.25" radius-outer="0.28" rotation="-90 0 0"
+                material="opacity: 0.9; transparent: true; shader: flat"
+                animation="property: scale; to: 1.3 1.3 1.3; dir: alternate; loop: true; dur: 800; easing: easeInOutQuad">
+        </a-ring>
+        <!-- Center radar grid wireframe -->
+        <a-circle color="#00d2ff" radius="0.6" rotation="-90 0 0"
+                  material="opacity: 0.15; transparent: true; wireframe: true; shader: flat">
+        </a-circle>
+        <!-- Vertical holographic scanning wave cylinder -->
+        <a-cylinder color="#00d2ff" radius="0.6" height="0.4" position="0 0.2 0"
+                    material="opacity: 0.1; transparent: true; wireframe: true; shader: flat"
+                    animation="property: scale; to: 1 0.1 1; dir: alternate; loop: true; dur: 1200; easing: easeInOutSine">
+        </a-cylinder>
+      </a-entity>
+
+      <!-- Base Plate (Diorama_Base) -->
+      <a-box 
+        id="diorama-base"
+        position="0 -0.025 0" 
+        width="2.6" 
+        height="0.05" 
+        depth="2.6" 
+        color="#f2efe9" 
+        metalness="0.1" 
+        roughness="0.8">
+      </a-box>
+
+      <!-- 4x4 Grid Building Container -->
+      <a-entity id="buildings-container"></a-entity>
+
+    </a-entity>
+  </a-scene>
+
+  <script>
+    // Bind Custom Button to Enter WebXR Handheld AR directly (disabling VR split screen)
+    document.getElementById("start-ar-btn").addEventListener("click", () => {
+      const scene = document.querySelector("a-scene");
+      if (scene.enterAR) {
+        scene.enterAR(); // Start immersive-ar directly
+      } else {
+        scene.enterVR(); // Fallback
+      }
+    });
+
+    // Grid settings matching Unity setup
+    const gridX = 4;
+    const gridZ = 4;
+    const spacing = 0.65;
+    const centerOffset = (gridX - 1) * spacing * 0.5;
+
+    // Building type configurations (height, color, glassColor)
+    const buildingTypes = [
+      { height: 0.4, color: "#eae7df", glassColor: "#1ba1e2" }, // Small
+      { height: 0.7, color: "#d9d5cb", glassColor: "#00a8ff" }, // Medium
+      { height: 1.1, color: "#c9c4b7", glassColor: "#0984e3" }  // Large
+    ];
+
+    // Seeded layout matching Unity grid
+    const layout = [
+      0, 1, 2, 1,
+      2, 0, 1, 2,
+      1, 2, 0, 1,
+      0, 1, 2, 0
+    ];
+
+    const container = document.getElementById("buildings-container");
+    const buildings = [];
+
+    // Generate building entities in a 4x4 grid
+    for (let x = 0; x < gridX; x++) {
+      for (let z = 0; z < gridZ; z++) {
+        const index = x * gridZ + z;
+        const typeIndex = layout[index % layout.length];
+        const type = buildingTypes[typeIndex];
+
+        // Local grid positions
+        const posX = x * spacing - centerOffset;
+        const posZ = z * spacing - centerOffset;
+
+        // Building parent entity (used to manage Y position & scale dynamically)
+        const buildingEl = document.createElement("a-entity");
+        buildingEl.setAttribute("position", `${posX} 0 ${posZ}`);
+
+        // Solid concrete/matte part
+        const bodyEl = document.createElement("a-box");
+        bodyEl.setAttribute("width", "0.4");
+        bodyEl.setAttribute("depth", "0.4");
+        bodyEl.setAttribute("height", type.height.toString());
+        bodyEl.setAttribute("color", type.color);
+        bodyEl.setAttribute("roughness", "0.9");
+        bodyEl.setAttribute("metalness", "0.0");
+        bodyEl.setAttribute("position", `0 ${type.height / 2} 0`);
+        buildingEl.appendChild(bodyEl);
+
+        // Futuristic Glass details
+        const glassEl = document.createElement("a-box");
+        glassEl.setAttribute("width", "0.3");
+        glassEl.setAttribute("depth", "0.3");
+        glassEl.setAttribute("height", (type.height * 0.4).toString());
+        glassEl.setAttribute("color", type.glassColor);
+        glassEl.setAttribute("material", "transparent: true; opacity: 0.6; metalness: 0.9; roughness: 0.1");
+        glassEl.setAttribute("position", `0 ${type.height * 0.7} 0`);
+        buildingEl.appendChild(glassEl);
+
+        container.appendChild(buildingEl);
+
+        buildings.push({
+          element: buildingEl,
+          origScaleY: 1.0,
+          origHeight: type.height
+        });
+      }
+    }
+
+    // Dynamic 3D printing effect update based on slider
+    const slider = document.getElementById("clutter-slider");
+    const label = document.getElementById("clutter-value");
+    const statusLabel = document.getElementById("clutter-status");
+
+    function updatePrinting(clutter) {
+      const progress = clutter * 1.5;
+      
+      buildings.forEach(b => {
+        const currentScaleY = b.origScaleY * progress;
+        b.element.setAttribute("scale", `1 ${currentScaleY} 1`);
+      });
+      
+      label.textContent = `${clutter.toFixed(2)} (${Math.round(clutter * 100)}%)`;
+    }
+
+    // Fallback slider for non-AR browser preview
+    slider.addEventListener("input", (e) => {
+      const val = parseFloat(e.target.value);
+      statusLabel.textContent = "Previewing 3D Print";
+      statusLabel.style.color = "#00d2ff";
+      updatePrinting(val);
+      
+      // Scale down reticle as slider moves
+      const fade = Math.max(0, 1.0 - val);
+      document.getElementById("scan-reticle").setAttribute('scale', `${fade} ${fade} ${fade}`);
+    });
+
+    // Initialize state (0% scale at start)
+    updatePrinting(0);
+  </script>
+</body>
+</html>
