@@ -4,6 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>DeskCity AR</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js"
+      }
+    }
+  </script>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body { background:#000; font-family:-apple-system,sans-serif; overflow:hidden; width:100vw; height:100vh; }
@@ -416,9 +423,9 @@ window.addEventListener('load', async () => {
   if (isIOS) {
     const container = document.getElementById('btn-container');
     container.innerHTML = `
-      <a id="start-btn-link" rel="ar" href="#" style="text-decoration:none; display:inline-block;">
-        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;">
-        <div id="start-btn-ios" class="btn-style-ios disabled">⏳ AR 준비 중...</div>
+      <a id="start-btn-link" class="btn-style-ios disabled" rel="ar" href="#" style="position:relative; text-decoration:none; display:inline-block; pointer-events:none;">
+        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" style="position:absolute; top:0; left:0; width:100%; height:100%; opacity:0.01; z-index:2; cursor:pointer;">
+        <span id="start-btn-text" style="position:relative; z-index:1; pointer-events:none;">⏳ AR 준비 중...</span>
       </a>
     `;
 
@@ -435,14 +442,15 @@ window.addEventListener('load', async () => {
       const blob = new Blob([arrayBuffer], { type: 'model/vnd.usdz+zip' });
       usdzBlobUrl = URL.createObjectURL(blob);
 
-      // Link the href directly to our anchor
+      // Link the href directly to our anchor and enable pointer events
       const link = document.getElementById('start-btn-link');
       link.setAttribute('href', usdzBlobUrl);
+      link.style.pointerEvents = 'auto';
 
-      // Enable the button
-      const btnIos = document.getElementById('start-btn-ios');
-      btnIos.textContent = '📷 AR 시작하기';
-      btnIos.classList.remove('disabled');
+      // Enable the button visually
+      link.classList.remove('disabled');
+      const textSpan = document.getElementById('start-btn-text');
+      textSpan.textContent = '📷 AR 시작하기';
 
       note.textContent = '✅ iOS AR 준비 완료! 버튼을 눌러 시작하세요.';
       note.style.borderColor = 'rgba(0,245,212,.3)';
@@ -452,8 +460,8 @@ window.addEventListener('load', async () => {
       note.textContent = '⚠ iOS AR 구성에 실패했습니다: ' + e.message;
       note.style.borderColor = 'rgba(255,80,80,.4)';
       note.style.color = 'rgba(255,120,120,.8)';
-      const btnIos = document.getElementById('start-btn-ios');
-      btnIos.textContent = '📷 AR 시작하기 (오류)';
+      const textSpan = document.getElementById('start-btn-text');
+      textSpan.textContent = '📷 AR 시작하기 (오류)';
     }
     return;
   }
