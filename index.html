@@ -102,11 +102,13 @@
 
 <script type="module">
 /* ─────────────────────────────────────────────────────────────────
-   DeskCity AR  —  Standalone WebXR + Three.js
-   Surface detection via hit-test, city locked in world space.
+   DeskCity AR  —  Standalone WebXR + Three.js + iOS Quick Look
+   Surface detection via hit-test on Android.
+   USDZExporter dynamically compiled for iOS AR Quick Look.
 ───────────────────────────────────────────────────────────────── */
 
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
+import { USDZExporter } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/exporters/USDZExporter.js';
 
 // ── State ─────────────────────────────────────────────────────
 const State = { IDLE:'idle', SCANNING:'scanning', PLACING:'placing', PLACED:'placed' };
@@ -118,6 +120,9 @@ let reticle, cityGroup, placedMatrix = null;
 
 let holdStart = 0, holdActive = false;
 let pointer = {x:.5, y:.5};   // normalised screen coords of first touch
+
+let usdzBlobUrl = null;
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // ── Three.js Setup ─────────────────────────────────────────────
 function initThree() {
@@ -156,17 +161,17 @@ function buildReticle() {
 function buildCity() {
   const group = new THREE.Group();
   const palette = [0x6c63ff, 0x00f5d4, 0xf15bb5, 0xffd166, 0x06d6a0];
-  const baseGeo = new THREE.BoxGeometry(1,1,1);
 
-  // Grid of buildings
+  // Grid of buildings (Using MeshStandardMaterial for USDZExporter compatibility)
   const cols=4, rows=4, spacing=.055;
   for (let x=0; x<cols; x++) for (let z=0; z<rows; z++) {
     const h = .04 + Math.random()*.14;
     const w = .03 + Math.random()*.02;
     const geo = new THREE.BoxGeometry(w, h, w);
-    const mat = new THREE.MeshPhongMaterial({
+    const mat = new THREE.MeshStandardMaterial({
       color: palette[Math.floor(Math.random()*palette.length)],
-      emissive: 0x111111, shininess: 40
+      roughness: 0.3,
+      metalness: 0.1
     });
     const mesh = new THREE.Mesh(geo, mat);
     const ox = (x - (cols-1)/2) * spacing;
@@ -178,7 +183,7 @@ function buildCity() {
   // Base plate
   const base = new THREE.Mesh(
     new THREE.BoxGeometry(.25,.004,.25),
-    new THREE.MeshPhongMaterial({color:0x1a1a2e})
+    new THREE.MeshStandardMaterial({color:0x1a1a2e, roughness: 0.7})
   );
   base.position.y = -.002;
   group.add(base);
@@ -197,6 +202,25 @@ function buildCity() {
 
 // ── Start AR ───────────────────────────────────────────────────
 window.startAR = async () => {
+  if (isIOS) {
+    if (!usdzBlobUrl) {
+      alert('AR 모델을 준비하는 중입니다. 잠시만 기다려 주세요.');
+      return;
+    }
+    // Launch Apple's Native AR Quick Look using the pre-generated USDZ blob
+    const a = document.createElement('a');
+    a.setAttribute('rel', 'ar');
+    a.setAttribute('href', usdzBlobUrl);
+    // Safari on some iOS versions requires a child node to click successfully
+    const img = document.createElement('img');
+    img.setAttribute('alt', 'AR');
+    a.appendChild(img);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+
   initThree();
 
   // Check support
@@ -378,8 +402,41 @@ function onSessionEnd() {
 }
 
 // ── Support check on load ───────────────────────────────────────
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   const note = document.getElementById('support-note');
+  const startBtn = document.getElementById('start-btn');
+
+  if (isIOS) {
+    note.textContent = '⏳ iOS 기기가 감지되었습니다. AR 모델을 생성하는 중...';
+    note.style.borderColor = 'rgba(255,200,0,.3)';
+    note.style.color = 'rgba(255,200,0,.8)';
+    startBtn.textContent = '⏳ AR 준비 중...';
+    startBtn.disabled = true;
+
+    try {
+      // Build the city group so we can export it
+      const tempCity = buildCity();
+      
+      const exporter = new USDZExporter();
+      const arrayBuffer = await exporter.parseAsync(tempCity);
+      const blob = new Blob([arrayBuffer], { type: 'model/vnd.usdz+zip' });
+      usdzBlobUrl = URL.createObjectURL(blob);
+
+      note.textContent = '✅ iOS AR 준비 완료! 버튼을 눌러 시작하세요.';
+      note.style.borderColor = 'rgba(0,245,212,.3)';
+      note.style.color = 'rgba(0,245,212,.8)';
+      startBtn.textContent = '📷 AR 시작하기';
+      startBtn.disabled = false;
+    } catch (e) {
+      console.error('USDZ Export failed:', e);
+      note.textContent = '⚠ iOS AR 구성에 실패했습니다: ' + e.message;
+      note.style.borderColor = 'rgba(255,80,80,.4)';
+      note.style.color = 'rgba(255,120,120,.8)';
+      startBtn.textContent = '📷 AR 시작하기 (오류)';
+    }
+    return;
+  }
+
   if (!navigator.xr) {
     note.textContent = '⚠ 이 브라우저는 WebXR를 지원하지 않습니다. Android Chrome을 사용해주세요.';
     note.style.borderColor = 'rgba(255,80,80,.4)';
