@@ -132,6 +132,7 @@ window.setStatus = function(msg) {
 
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
 import { USDZExporter } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/exporters/USDZExporter.js';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/loaders/GLTFLoader.js';
 
 // ── State ─────────────────────────────────────────────────────
 const State = { IDLE:'idle', SCANNING:'scanning', PLACING:'placing', PLACED:'placed' };
@@ -145,6 +146,7 @@ let holdStart = 0, holdActive = false;
 let pointer = {x:.5, y:.5};   // normalised screen coords of first touch
 
 let usdzBlobUrl = null;
+let dioramaModel = null;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // ── Three.js Setup ─────────────────────────────────────────────
@@ -160,8 +162,8 @@ function initThree() {
   scene.add(camera);
 
   // Lighting
-  scene.add(new THREE.AmbientLight(0xffffff, .7));
-  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  scene.add(new THREE.AmbientLight(0xffffff, .8));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.5);
   dir.position.set(2,4,3); scene.add(dir);
 
   // Reticle (placement ring)
@@ -170,7 +172,12 @@ function initThree() {
   scene.add(reticle);
 
   // City group (stays hidden until placed)
-  cityGroup = buildCity(false);
+  cityGroup = new THREE.Group();
+  if (dioramaModel) {
+    const instance = dioramaModel.clone();
+    instance.scale.set(1, 0.01, 1);
+    cityGroup.add(instance);
+  }
   cityGroup.visible = false;
   scene.add(cityGroup);
 }
@@ -181,54 +188,31 @@ function buildReticle() {
   return new THREE.Mesh(g, m);
 }
 
-function buildCity(fullHeight = false) {
-  const group = new THREE.Group();
-  const palette = [0x6c63ff, 0x00f5d4, 0xf15bb5, 0xffd166, 0x06d6a0];
-
-  // Grid of buildings (Using MeshStandardMaterial for USDZExporter compatibility)
-  const cols=4, rows=4, spacing=.055;
-  for (let x=0; x<cols; x++) for (let z=0; z<rows; z++) {
-    const h = .04 + Math.random()*.14;
-    const w = .03 + Math.random()*.02;
-    const geo = new THREE.BoxGeometry(w, h, w);
-    const mat = new THREE.MeshStandardMaterial({
-      color: palette[Math.floor(Math.random()*palette.length)],
-      roughness: 0.3,
-      metalness: 0.1
+function loadDioramaModel() {
+  return new Promise((resolve, reject) => {
+    const loader = new GLTFLoader();
+    loader.load('./Models/DeskDiorama_Building.glb', (gltf) => {
+      dioramaModel = gltf.scene;
+      
+      // Fix material and layout settings for USDZExporter compatibility
+      dioramaModel.traverse((child) => {
+        if (child.isMesh) {
+          // Double check or assign MeshStandardMaterial if missing
+          if (!child.material) {
+            child.material = new THREE.MeshStandardMaterial({ color: 0x888888 });
+          }
+          child.material.roughness = 0.5;
+          child.material.metalness = 0.1;
+        }
+      });
+      
+      resolve(dioramaModel);
+    }, undefined, (error) => {
+      reject(error);
     });
-    const mesh = new THREE.Mesh(geo, mat);
-    const ox = (x - (cols-1)/2) * spacing;
-    const oz = (z - (rows-1)/2) * spacing;
-    mesh.userData = { h, x, z };
-    if (fullHeight) {
-      mesh.position.set(ox, h/2, oz);
-      mesh.scale.set(1, 1, 1);
-    } else {
-      mesh.position.set(ox, (h * 0.01) / 2, oz);
-      mesh.scale.set(1, 0.01, 1);
-    }
-    group.add(mesh);
-  }
-
-  // Base plate
-  const base = new THREE.Mesh(
-    new THREE.BoxGeometry(.25,.004,.25),
-    new THREE.MeshStandardMaterial({color:0x1a1a2e, roughness: 0.7})
-  );
-  base.position.y = -.002;
-  group.add(base);
-
-  // Road grid lines
-  const lineMat = new THREE.LineBasicMaterial({color:0xffffff, opacity:.3, transparent:true});
-  [-1,0,1].forEach(i => {
-    const pts = [new THREE.Vector3(i*.06,0,-.12), new THREE.Vector3(i*.06,0,.12)];
-    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
-    const pts2 = [new THREE.Vector3(-.12,0,i*.06), new THREE.Vector3(.12,0,i*.06)];
-    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts2), lineMat));
   });
-
-  return group;
 }
+
 
 // ── Start AR ───────────────────────────────────────────────────
 window.startAR = async () => {
@@ -374,6 +358,7 @@ function onTouchEnd(e) {
 function onTouchMove(e) { e.preventDefault(); }
 
 // ── Placement ──────────────────────────────────────────────────
+// ── Placement ──────────────────────────────────────────────────
 function placeCity() {
   placedMatrix = Array.from(cityGroup.matrix.elements);
   cityGroup.matrixAutoUpdate = false;
@@ -386,31 +371,20 @@ function placeCity() {
     document.getElementById('ar-hud').style.transition = 'opacity .5s';
   }, 3000);
 
-  // Build effect: animate buildings up sequentially (wave progression)
-  cityGroup.children.forEach((mesh) => {
-    if (mesh.isMesh && mesh.geometry.type === 'BoxGeometry' && mesh.userData && mesh.userData.h !== undefined) {
-      const h = mesh.userData.h;
-      const x = mesh.userData.x;
-      const z = mesh.userData.z;
-      
-      const delay = (x + z) / 6 * 400; // Delay offset between 0 and 400ms (grid X + Z goes from 0 to 6)
-      setTimeout(() => {
-        let elapsed = 0;
-        const duration = 600; // 600ms build duration for each building
-        const interval = setInterval(() => {
-          elapsed += 16;
-          const progress = Math.min(elapsed / duration, 1);
-          const ease = 1 - Math.pow(1 - progress, 3); // Cubic ease out
-          
-          const currentScaleY = Math.max(0.01, ease);
-          mesh.scale.y = currentScaleY;
-          mesh.position.y = (h * currentScaleY) / 2;
-          
-          if (progress >= 1) clearInterval(interval);
-        }, 16);
-      }, delay);
-    }
-  });
+  // Build effect: animate diorama model scaling up smoothly
+  let elapsed = 0;
+  const duration = 1000; // 1s build duration
+  const interval = setInterval(() => {
+    elapsed += 16;
+    const progress = Math.min(elapsed / duration, 1);
+    const ease = 1 - Math.pow(1 - progress, 3); // Cubic ease out
+    
+    cityGroup.children.forEach((child) => {
+      child.scale.set(1, Math.max(0.01, ease), 1);
+    });
+    
+    if (progress >= 1) clearInterval(interval);
+  }, 16);
 }
 
 function resetPlacement() {
@@ -424,11 +398,8 @@ function resetPlacement() {
   document.getElementById('hint').textContent = '📍 바닥이나 책상을 비춰주세요...';
 
   // Reset building scales
-  cityGroup.children.forEach(mesh => {
-    if (mesh.isMesh && mesh.geometry.type === 'BoxGeometry' && mesh.userData && mesh.userData.h !== undefined) {
-      mesh.scale.set(1, 0.01, 1);
-      mesh.position.y = (mesh.userData.h * 0.01) / 2;
-    }
+  cityGroup.children.forEach((child) => {
+    child.scale.set(1, 0.01, 1);
   });
 }
 
@@ -449,10 +420,24 @@ function onSessionEnd() {
 // ── Support check on load ───────────────────────────────────────
 window.addEventListener('load', async () => {
   const note = document.getElementById('support-note');
-  const startBtn = document.getElementById('start-btn');
+  const container = document.getElementById('btn-container');
+
+  note.textContent = '⏳ 3D 디오라마 모델을 로딩 중...';
+  note.style.borderColor = 'rgba(255,200,0,.3)';
+  note.style.color = 'rgba(255,200,0,.8)';
+
+  try {
+    await loadDioramaModel();
+    note.textContent = '✅ 3D 모델 로딩 완료!';
+  } catch (e) {
+    console.error('Model loading failed:', e);
+    note.textContent = '⚠ 3D 모델 로딩 실패: ' + e.message;
+    note.style.borderColor = 'rgba(255,80,80,.4)';
+    note.style.color = 'rgba(255,120,120,.8)';
+    return;
+  }
 
   if (isIOS) {
-    const container = document.getElementById('btn-container');
     container.innerHTML = `
       <a id="start-btn-link" class="btn-style-ios disabled" rel="ar" href="#" style="position:relative; text-decoration:none; display:inline-block; pointer-events:none;">
         <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" style="position:absolute; top:0; left:0; width:100%; height:100%; opacity:0.01; z-index:2; cursor:pointer;">
@@ -460,16 +445,17 @@ window.addEventListener('load', async () => {
       </a>
     `;
 
-    note.textContent = '⏳ iOS 기기가 감지되었습니다. AR 모델을 생성하는 중...';
+    note.textContent = '⏳ iOS용 USDZ AR 모델 변환 중...';
     note.style.borderColor = 'rgba(255,200,0,.3)';
     note.style.color = 'rgba(255,200,0,.8)';
 
     try {
-      // Build the city group so we can export it
-      const tempCity = buildCity();
+      // Create a temporary group containing the full scale model for USDZ export
+      const tempGroup = new THREE.Group();
+      tempGroup.add(dioramaModel.clone());
       
       const exporter = new USDZExporter();
-      const arrayBuffer = await exporter.parseAsync(tempCity);
+      const arrayBuffer = await exporter.parseAsync(tempGroup);
       const blob = new Blob([arrayBuffer], { type: 'model/vnd.usdz+zip' });
       usdzBlobUrl = URL.createObjectURL(blob);
 
@@ -511,6 +497,7 @@ window.addEventListener('load', async () => {
     }
   });
 });
+
 </script>
 </body>
 </html>
